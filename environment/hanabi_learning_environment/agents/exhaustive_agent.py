@@ -77,7 +77,7 @@ import time
 #DOSSIER_COURANT = os.path.dirname(os.path.abspath(__file__))
 #DOSSIER_PARENT = os.path.dirname(DOSSIER_COURANT)
 #print(DOSSIER_PARENT)
-#sys.path.append(DOSSIER_PARENT)
+#sys.path.append(DOSSIER_PARENT) sleep print
 
 
 #from hanabi_learning_environment import pyhanabi
@@ -170,6 +170,7 @@ class ExtensiveAgent(Agent):
         return self._extract_dict_from_backend(local_player_id, self.global_game_state.observation(local_player_id))
     
     def assure_agent_hand_compatible(self, card_to_verify, available = None):
+        #print("assure_agent_hand_compatible debut:", available, self.global_game_state.player_hands, card_to_verify ,flush = True)
         verif_color = color_char_to_idx(card_to_verify["color"])
         verif_rank = card_to_verify["rank"]
 
@@ -187,8 +188,10 @@ class ExtensiveAgent(Agent):
                                 available_cards[i][j] -= 1 # We just decided to take it
                                 available_cards[verif_color][verif_rank] += 1 # We just freed it
                                 for k in range(self.config["players"]):
+                                    #print(self.global_game_state.player_hands(), k, k, k, k)
                                     self.global_game_state.set_individual_card(self.local_id(0), n, 
                                         {"color": color_idx_to_char(i), "rank": j})
+                                #print("assure_agent_hand_compatible fin:", available, self.global_game_state.player_hands, flush = True)
                                 return available_cards
             
         return available_cards
@@ -229,21 +232,29 @@ class ExtensiveAgent(Agent):
 
     
     def draw_good_card(self, local_id, observation):
-        print("Starting draw_good_card:", local_id)
+        #print("Starting draw_good_card:", local_id)
         self.global_game_state.deal_random_card()
 
         relative = self.relative_id(local_id)
-
+        available_cards = ExtensiveAgent.unseen_cards(self.produce_current_state_observation())
+                    
+        # Preparing the available cards by reserving the useful ones
+        
         # If not, it is the agent, and we don't know which card to give 
         if relative != 0:
+            for card in self.global_game_state.player_hands()[self.local_id(0)]: #TODO: hand = agent hand
+                available_cards[card.color()][card.rank()] -= 1
+            #print("Qu'est ce que c'est que cette erreur sur la couleur ?:",observation["observed_hands"][relative][-1], flush = True)
+            self.assure_agent_hand_compatible(observation["observed_hands"][relative][-1], available_cards)
             # The same bug explanation for this loop
+            card_to_set = observation["observed_hands"][relative][-1]
             for i in range(self.config["players"]):
-                self.global_game_state.set_individual_card(local_id, self.config["hand_size"] - 1, observation["observed_hands"][relative][-1])
+                self.global_game_state.set_individual_card(local_id, self.config["hand_size"] - 1, card_to_set)
 
         return 0
 
     def prepare_hand(self, local_id, observation, type_of_reveal, value):
-        print("Starting prepare_hand:", local_id, flush = True)
+        #print("Starting prepare_hand:", local_id, flush = True)
         relative = self.relative_id(local_id)
 
         # If not, it is theorically useless to change the hand (unless somme mistakes have been made previously, creating a wrong state)
@@ -251,7 +262,7 @@ class ExtensiveAgent(Agent):
             hand_to_be_set = []
             all_cards_in_hand = self.global_game_state.player_hands()[self.local_id(0)]
             possible_cards = ExtensiveAgent.unseen_cards(self.produce_current_state_observation()) 
-            print("Possible cards:", possible_cards)
+            #print("Possible cards:", possible_cards)
 
             #TODO: CHECK IF NECESSARY, BECAUSE CAN CRASH IN END-GAME !!! We reserve the cards currently in hand (maybe not necessary)
             #for card in all_cards_in_hand:
@@ -270,7 +281,7 @@ class ExtensiveAgent(Agent):
                     else:
                         possible_cards, card = self.select_card(value, False, type_of_reveal, possible_cards)
                 else:
-                    print("Bad reveal_type in prepare_hand:", local_id, observation, type_of_reveal, value, flush=True)
+                    #print("Bad reveal_type in prepare_hand:", local_id, observation, type_of_reveal, value, flush=True)
                     return -1
                 #possible_cards[all_cards_in_hand[n].color()][all_cards_in_hand[n].rank()] += 1
                 if card is not None:
@@ -279,8 +290,8 @@ class ExtensiveAgent(Agent):
                     #TODO: This case must be treated, by replacing the already present cards in hand (assure_agent_hand_compatible function ?)
                     print("Pas assez de carte pour compléter la main correctement:", hand_to_be_set, possible_cards, flush=True)
                     return -1
-            print("Hand to be set:", hand_to_be_set, flush = True)
-            time.sleep(1)
+            #print("Hand to be set:", hand_to_be_set, flush = True)
+            #time.sleep(1)
             for i in range(self.config["players"]):
                 self.global_game_state.set_hand(local_id, hand_to_be_set)
 
@@ -324,14 +335,17 @@ class ExtensiveAgent(Agent):
 
                 # Our hand is invalid, so we start from the 2nd player 
                 if i != 0:
+                    #Possible probleme si on a 10 joueurs (donc pas de deck, mais on s'en fiche un peu)
                     available_cards = ExtensiveAgent.unseen_cards(self.produce_current_state_observation())
                     
                     # Preparing the available cards by reserving the useful ones
                     for card in hand:
                         available_cards[color_char_to_idx(card["color"])][card["rank"]] -= 1
                     for card in hand:
+                        print("On vire la carte:", card, flush = True)
+                        print("Dans les mains", self.global_game_state.player_hands() , flush = True)
                         available_cards = self.assure_agent_hand_compatible(card, available_cards)
-                    print("The current hands on the board, and the hand to be set:", self.global_game_state.player_hands(), hand)
+                    #print("The current hands on the board, and the hand to be set:", self.global_game_state.player_hands(), hand)
                     self.global_game_state.set_hand(self.local_id(i), hand)
 
             #There's a bug in set_hand, so we have to correct the current_player by setting another time the last hand
@@ -349,9 +363,9 @@ class ExtensiveAgent(Agent):
         print("Starting the generalpart of building", flush = True)
         ################## GENERAL PART ###################
         for current_history_item in last_moves_ordered:
-            print("Current history item:", current_history_item, flush = True)
-            print("Current Local player (to play):", self.global_game_state.cur_player())
-            print("Offset real / local (so the id of the agent):", self.offset_real_local, self.local_id(0))
+            #print("Current history item:", current_history_item, flush = True)
+            #print("Current Local player (to play):", self.global_game_state.cur_player())
+            #print("Offset real / local (so the id of the agent):", self.offset_real_local, self.local_id(0))
 
             current_move = current_history_item.move()
             current_move_type = current_move.type()
@@ -366,9 +380,9 @@ class ExtensiveAgent(Agent):
             
 
             if current_move_type == HanabiMoveType.PLAY: # TODO: put the good cards in hand
-                print("Entering the PLAY condition", flush = True)
+                #print("Entering the PLAY condition", flush = True)
                 if self.global_game_state.move_is_legal(current_move):
-                    print("PLAY condition verified", flush = True)
+                    #print("PLAY condition verified", flush = True)
 
                     if relative_player == 0:
                         for i in range(self.config["players"]):
@@ -379,17 +393,16 @@ class ExtensiveAgent(Agent):
                             # Preparing the available cards by reserving the useful ones
                             for c in hand:
                                 available_cards[c.color()][c.rank()] -= 1
-                            for c in hand:
-                                available_cards = self.assure_agent_hand_compatible({"color": color_idx_to_char(c.color()), "rank": c.rank()}, available_cards)
+                            available_cards = self.assure_agent_hand_compatible(card, available_cards)
                             self.global_game_state.set_individual_card(current_local_player, current_move.card_index(), 
                                 card)
-                            print("PLAY move hand changed successfully", flush = True)
-                    time.sleep(1)
+                            #print("PLAY move hand changed successfully", flush = True)
+                    #time.sleep(1)
 
-                    print("LOCAL PLAYER ID BEFORE MOVE:", self.global_game_state.cur_player(), flush = True)
-                    print("LEGAL MOVES:", self. global_game_state.legal_moves())
+                    #print("LOCAL PLAYER ID BEFORE MOVE:", self.global_game_state.cur_player(), flush = True)
+                    #print("LEGAL MOVES:", self. global_game_state.legal_moves())
                     self.global_game_state.apply_move(current_move)
-                    print("PLAY move applied successfully", flush = True)
+                    #print("PLAY move applied successfully", flush = True)
                     self.draw_good_card(current_local_player, observation)
                     
                 else:
@@ -397,28 +410,28 @@ class ExtensiveAgent(Agent):
                     return -1
 
             elif current_move_type == HanabiMoveType.DISCARD: # TODO: put the good cards in hand
-                print("Entering the DISCARD condition", flush = True)
+                #print("Entering the DISCARD condition", flush = True)
                 if self.global_game_state.move_is_legal(current_move):
-                    print("DISCARD condition verified", flush = True)
+                    #print("DISCARD condition verified", flush = True)
                     if relative_player == 0:
                         for i in range(self.config["players"]):
                             card = {"color": color_idx_to_char(current_history_item.color()), "rank": current_history_item.rank()}
+                            #print("GENERAL, card to bet set:", card)
                             available_cards = ExtensiveAgent.unseen_cards(self.produce_current_state_observation())
                             hand = self.global_game_state.player_hands()[self.local_id(0)] # The agent's hand
                             # Preparing the available cards by reserving the useful ones
                             for c in hand:
                                 available_cards[c.color()][c.rank()] -= 1
-                            for c in hand:
-                                available_cards = self.assure_agent_hand_compatible({"color": color_idx_to_char(c.color()), "rank": c.rank()}, available_cards)
+                            available_cards = self.assure_agent_hand_compatible(card, available_cards)
                             self.global_game_state.set_individual_card(current_local_player, current_move.card_index(), 
                                 card)
-                            print("DISCARD move hand changed successfully", flush = True)
-                    time.sleep(1)
+                            #print("DISCARD move hand changed successfully", flush = True)
+                    #time.sleep(1)
                     
-                    print("LOCAL PLAYER ID BEFORE MOVE:", self.global_game_state.cur_player(), flush = True)
-                    print("LEGAL MOVES:", self. global_game_state.legal_moves())
+                    #print("LOCAL PLAYER ID BEFORE MOVE:", self.global_game_state.cur_player(), flush = True)
+                    #print("LEGAL MOVES:", self. global_game_state.legal_moves())
                     self.global_game_state.apply_move(current_move)
-                    print("DISCARD move applied successfully", flush = True)
+                    #print("DISCARD move applied successfully", flush = True)
                     self.draw_good_card(current_local_player, observation)
                     
                 else:
@@ -426,35 +439,35 @@ class ExtensiveAgent(Agent):
                     return -1
 
             elif current_move_type == HanabiMoveType.REVEAL_RANK:
-                print("Entering the REVEAL_RANK condition", flush = True)
+                #print("Entering the REVEAL_RANK condition", flush = True)
 
                 self.prepare_hand((current_local_player + current_move.target_offset()) % self.config["players"] , observation, "rank", current_move.rank())
-                time.sleep(1)
-                print("REVEAL_RANK hand set successfully", flush = True)
+                #time.sleep(1)
+                #print("REVEAL_RANK hand set successfully", flush = True)
                 if self.global_game_state.move_is_legal(current_move):
-                    time.sleep(1)
-                    print("REVEAL_RANK condition verified", flush = True)
-                    print("LOCAL PLAYER ID BEFORE MOVE:", self.global_game_state.cur_player(), flush = True)
+                    #time.sleep(1)
+                    #print("REVEAL_RANK condition verified", flush = True)
+                    #print("LOCAL PLAYER ID BEFORE MOVE:", self.global_game_state.cur_player(), flush = True)
                     self.global_game_state.apply_move(current_move)
-                    print("REVEAL_RANK move applied successfully", flush = True)
+                    #print("REVEAL_RANK move applied successfully", flush = True)
                     
                 else:
                     print("The REVEAL_RANK move given isn't legal:", current_move, flush = True)
                     return -1
 
             elif current_move_type == HanabiMoveType.REVEAL_COLOR:
-                print("Entering the REVEAL_COLOR condition", flush = True)
+                #print("Entering the REVEAL_COLOR condition", flush = True)
 
                 
                 self.prepare_hand((current_local_player + current_move.target_offset()) % self.config["players"] , observation, "color", current_move.color())
-                time.sleep(1)
-                print("REVEAL_COLOR hand set successfully", flush = True)
+                #time.sleep(1)
+                #print("REVEAL_COLOR hand set successfully", flush = True)
                 if self.global_game_state.move_is_legal(current_move):
-                    time.sleep(1)
-                    print("REVEAL_COLOR condition verified", flush = True)
-                    print("LOCAL PLAYER ID BEFORE MOVE:", self.global_game_state.cur_player(), flush = True)
+                    #time.sleep(1)
+                    #print("REVEAL_COLOR condition verified", flush = True)
+                    #print("LOCAL PLAYER ID BEFORE MOVE:", self.global_game_state.cur_player(), flush = True)
                     self.global_game_state.apply_move(current_move)
-                    print("REVEAL_COLOR move applied successfully", flush = True)
+                    #print("REVEAL_COLOR move applied successfully", flush = True)
                     
                 else:
                     print("The REVEAL_COLOR move given isn't legal:", current_move, flush = True)
@@ -498,6 +511,10 @@ class ExtensiveAgent(Agent):
         for i in range(len(observation["observed_hands"]) - 1):
             for card in observation["observed_hands"][i + 1]:
                 currently_unseen_cards[color_char_to_idx(card["color"])][card["rank"]] -= 1
+        for key in observation["fireworks"]:
+            #print(observation["fireworks"], flush = True)
+            for j in range(observation["fireworks"][key]):
+                currently_unseen_cards[color_char_to_idx(key)][j] -= 1
         return currently_unseen_cards
     
     def _extract_dict_from_backend(self, player_id, observation): # Copied from rl_env !
@@ -686,7 +703,9 @@ class ExtensiveAgent(Agent):
         if observation["current_player_offset"] != 0:
             return None
         print(observation)
-        self.prepare_global_game_state(observation)
+        b = self.prepare_global_game_state(observation)
+        if b == -1:
+            return  -1
         chosen_random = random.randint(0,len(observation["legal_moves"]) - 1)
         print(observation["legal_moves"])
         return observation["legal_moves"][chosen_random]

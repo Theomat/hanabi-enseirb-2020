@@ -591,7 +591,12 @@ class HanabiState(object):
     """If cur_player == CHANCE_PLAYER_ID, make a specific card-deal move."""
     assert self.cur_player() == CHANCE_PLAYER_ID
     move = HanabiMove.get_deal_specific_move(card_index, player_id, color, rank)
-    self.apply_move(move)
+    if self.move_is_legal(move):
+        self.apply_move(move)
+    else:
+        print("CE MOVE N'EST PAS LEGAL:", move)
+        print("AVEC CES INFORMATIONS:", self.player_hands(), self.cur_player())
+        sys.exit(-1)
 
   def return_card(self, player_id, card_index):
     """Return the specific card from the hand of the specified player to the
