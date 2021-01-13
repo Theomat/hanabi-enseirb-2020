@@ -165,6 +165,82 @@ class ExtensiveAgent(Agent):
         #self.players_partial_belief = [ pb.PartialBelief(self.config["players"], 0, 0) for i in range(self.config["players"])] # The partial beliefs (only used to have
                                                                                                                                #easily the probabilities). Every player                                                                                                      #must use its local id (for coherence)
     
+    def _prob_color(self, color: int, offset: int, observation) -> float:
+        total_cards = self._total_cards(offset, color=False)
+        if total_cards == 0:
+            return 0
+        total_colors = np.sum(unseen_cards(observation)[color])  # - self.virtual_colors[color] # MODIFY WITH sum(unseen_cards(observation)[color_idx])
+        return total_colors / total_cards
+
+    def _prob_rank(self, rank: int,  offset: int, observation) -> float:
+        total_cards = self._total_cards(offset, rank=False)
+        if total_cards == 0:
+            return 0
+        total_colors = np.sum(self._filtered_deck(offset)[:, rank])  # - self.virtual_ranks[rank]
+        return total_colors / total_cards
+
+    def _prob_card(self, rank: int, color: int, offset: int, observation) -> float:
+        total_cards = self._total_cards(offset, color=False, rank=False)
+        # print("Total cards=", total_cards)
+        if total_cards == 0:
+            return 0
+        total_in_deck = self.deck[color, rank] #MODIFY
+        return total_in_deck / total_cards
+
+    def _prob_card_knowing_color(self, rank: int, color: int, offset: int, observation) -> float:
+        # p1 = P(C=r & R=r)
+        # p2 = P(C=c)
+        p1 = self._prob_card(rank, color, offset, observation)
+        return p1
+
+    def _prob_card_knowing_rank(self, rank: int, color: int, offset: int, observation) -> float:
+        # p1 = P(C=r & R=r)
+        # p1 does not take into account hints
+        # p2 = P(R=R)
+        p1 = self._prob_card(rank, color, offset, observation)
+        return p1
+
+    def probability(self, card_ offset: int, rank: int = -1, color: str = None, observation) -> float:
+        """
+        Computes the asked probability.
+        If only a ```color``` is specified, computes the probability of the card being of the specified ```color```.
+        If only a ```rank``` is specified, computes the probability of the card being of the specified ```rank```.
+        If no ```color``` nor ```rank``` is specified return ```1```.
+
+        Parameters
+        -----------
+        - **card_offset**: the offset of the card in you hand that you want information about
+        - **rank**: (*optional*) the rank you want information about
+        - **color**: (*optional*) the color you want information about
+
+        Return
+        -----------
+        A float in ```[0; 1]``` that specifies the probability of the specified card matching the parameters given.
+        """
+        if rank is None:
+            rank = -1
+        card_info = self.hand[card_offset]
+        if rank == -1:
+            if color is None:
+                return 1
+            return self._prob_color(_COLOR_TO_INDEX[color], card_offset, observation)
+        elif color is None:
+            return self._prob_rank(rank, card_offset, observation)
+        else:
+            r = card_info["rank"]
+            c = card_info["color"]
+            cindex = _COLOR_TO_INDEX[color]
+            if r == rank and c == color:
+                return 1
+            elif c is None and rank == r:
+                return self._prob_card_knowing_rank(rank, cindex, card_offset, observation)
+            elif c == color and r is None:
+                return self._prob_card_knowing_color(rank, cindex, card_offset, observation)
+            elif c is None and r is None:
+                return self._prob_card(rank, cindex, card_offset, observation)
+            else:
+                return 0
+
     def produce_current_state_observation(self):
         local_player_id = self.local_id(0)
         return self._extract_dict_from_backend(local_player_id, self.global_game_state.observation(local_player_id))
