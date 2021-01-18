@@ -547,7 +547,7 @@ class HanabiState(object):
     return HanabiObservation(self._state, self._game, player)
 
   def apply_move(self, move):
-    """Advance the environment state by making move for acting player."""
+    """Advance the environment state by making move for acting player.""" # LEGAL
     lib.StateApplyMove(self._state, move.c_move)
 
   def cur_player(self):
@@ -579,7 +579,9 @@ class HanabiState(object):
     """
     firework_list = []
     num_colors = lib.NumColors(self._game)
-    for c in range(num_colors):
+    #print("fireworks nb of colors:", num_colors)
+    #for c in range(num_colors):
+    for c in range(5):
       firework_list.append(lib.StateFireworks(self._state, c))
     return firework_list
 
@@ -594,8 +596,11 @@ class HanabiState(object):
     if self.move_is_legal(move):
         self.apply_move(move)
     else:
+        print()
         print("CE MOVE N'EST PAS LEGAL:", move)
-        print("AVEC CES INFORMATIONS:", self.player_hands(), self.cur_player())
+        #print("AVEC CES INFORMATIONS:", self.player_hands(), self.cur_player())
+        #print( self.fireworks(), self.discard_pile())
+        print("AVEC CES INFORMATIONS:", self)
         sys.exit(-1)
 
   def return_card(self, player_id, card_index):

@@ -146,17 +146,20 @@ class ExtensiveAgent(Agent):
           - max_iteration: int, Maximum Depth of the search. """
 
         self.config = config
-        print(config)
+        print("La configuration de la game:", config)
         # Extract max info tokens or set default to 8.
         self.max_information_tokens = config.get("information_tokens", 8)
-        self.max_iteration = config.get("max_iteration", 1)
+        self.max_iteration = config.get("max_iteration", 2)
         self.config["random_start_player"] = False # To start at 0
         self.global_game = HanabiGame(self.config)
         self.global_game_state = self.global_game.new_initial_state()
         self.observation_encoder = ObservationEncoder(
             self.global_game, ObservationEncoderType.CANONICAL)
 
-        # !!! PUT IT EVERYWHERE IT IS NEEDED
+        # Both are used in the expected values computation, to limit the time needed
+        self.threshold_random = 1000
+        self.limit_tests = 0
+
         self.hands_initialized = False
         self.saved_observation = None
         self.previous_observation = None
@@ -740,7 +743,7 @@ class ExtensiveAgent(Agent):
         return available_cards, probabilities, possible_cards
 
 
-    def enumerate_hands(self, possible_cards_in_each_position, current_indices_hand = None): #, current_tested_hand
+    def enumerate_hands(self, possible_cards_in_each_position, current_indices_hand = None, nb_tests = 0): #, current_tested_hand
         """ Use the current tested hand indices, the observation and the possible cards in each hand position to return the next hand to be tested
 
         current_indices_hand is used to remember indices of the possible_cards_in_each_position 2D list, so we don't have to loose time searching
@@ -750,16 +753,26 @@ class ExtensiveAgent(Agent):
         if current_indices_hand is None:
             current_indices_hand = [0] * self.config["hand_size"]
             return current_indices_hand, [possible_cards_in_each_position[i][current_indices_hand[i]] for i in range(self.config["hand_size"])]
-        current_position = 0
-        while 1:
-            current_indices_hand[current_position] += 1
-            if len(possible_cards_in_each_position[current_position]) <= current_indices_hand[current_position]: # all the possible cards in this position has been tried
-                current_indices_hand[current_position] = 0
-                current_position += 1
-                if current_position >= self.config["hand_size"]:
-                    return None # All the hands have been tested
-            else:
-                return current_indices_hand, [possible_cards_in_each_position[i][current_indices_hand[i]] for i in range(self.config["hand_size"])]
+        
+        if nb_tests < self.threshold_random:
+            current_position = 0
+            while 1:
+                current_indices_hand[current_position] += 1
+                if len(possible_cards_in_each_position[current_position]) <= current_indices_hand[current_position]: # all the possible cards in this position has been tried
+                    current_indices_hand[current_position] = 0
+                    current_position += 1
+                    if current_position >= self.config["hand_size"]:
+                        return None # All the hands have been tested
+                else:
+                    return current_indices_hand, [possible_cards_in_each_position[i][current_indices_hand[i]] for i in range(self.config["hand_size"])]
+        
+        else:
+            if self.limit_tests >= self.threshold_random:
+                self.limit_tests = 0
+                return None
+            self.limit_tests += 1
+            new_indices = [ random.randint(0, len(possible_cards_in_each_position[i]) - 1) for i in range(len(current_indices_hand))]
+            return new_indices, [possible_cards_in_each_position[i][new_indices[i]] for i in range(self.config["hand_size"])]
 
     def hand_probability(self, current_indices_hand, list_proba_cards):
         proba = 1
@@ -777,6 +790,7 @@ class ExtensiveAgent(Agent):
         next_local_player_id = (local_player_id + 1) % self.config["players"]
         for action_index, action in enumerate(all_actions):
                 tempo_state = state.copy() # Could be optimized a lot if a function "pop" was created (instead of cloning the entire state each time !)
+                #print("game:",tempo_state._game)
                 if tempo_state.move_is_legal(action):
                     tempo_state.apply_move(action)
                 else:
@@ -786,22 +800,24 @@ class ExtensiveAgent(Agent):
                 #If the game is finished after the move
                 if tempo_state.is_terminal():
                     if return_list:
-                        total[action_index] += score_game(tempo_state)
+                        total[action_index] += ExtensiveAgent.score_game(tempo_state)
                     else:
                       total += ExtensiveAgent.score_game(tempo_state)
                     continue
-                available = ExtensiveAgent.unseen_cards(self.produce_current_state_observation(local_player_id, tempo_state))
+                
                 #An observation from the same player, but he hasn't the play, because he just played ! (TODO: if not used at all in REVEAL case, move it in the "if" condition)
                 tempo_observation = self.produce_current_state_observation(local_player_id , tempo_state) 
                 if (action.type() == HanabiMoveType.DISCARD 
                     or action.type() == HanabiMoveType.PLAY): 
-
+                    
                     
 
                     #as usual, start with random, But it's theorically useless to assure that the card we want to set isn't already used in the hand 
                     #(because we've created a plausible game at iteration 0, so we can use all the hands in the state)  
                     tempo_state.deal_random_card()
-
+                    available = ExtensiveAgent.unseen_cards(self.produce_current_state_observation(local_player_id, tempo_state))
+                    #print("available in all_moves:",tempo_state.fireworks(),available)
+                    
                     # cards which can replace the card that has been played on a PLAY or DISCARD (last card, because just drawn)
                     _, proba_cards, cards = self.calculate_all_possible_cards_and_prob(tempo_state, self.config["hand_size"] - 1, local_player_id, True, available, False) 
                     for card_idx, card_possible in enumerate(cards):
@@ -824,11 +840,12 @@ class ExtensiveAgent(Agent):
         return total
 
     def is_possible_hand(self, current_hand, available_cards):
+        #print("is_possible_hand debug:", current_hand, available_cards)
         test = np.zeros((self.config["colors"], self.config["hand_size"]), dtype = int)
 
         for card in current_hand:
             test[color_char_to_idx(card["color"])][card["rank"]] += 1
-        
+
         for i in range(len(test)):
             for j in range(len(test[0])):
                 if test[i][j] > available_cards[i][j]:
@@ -846,7 +863,7 @@ class ExtensiveAgent(Agent):
 
         if iteration_level != 0:
             total = 0
-
+            #print("Secondary player")
             # The same next player for each move
             
 
@@ -874,22 +891,31 @@ class ExtensiveAgent(Agent):
             
             available = None
             for card_index in range(self.config["hand_size"]):
-                # DON'T USE OTHER CARDS OF THE HAND (they are worth nothing)
-                available, proba_cards, cards = self.calculate_all_possible_cards_and_prob(state, card_index, local_player_id, False, available, True) 
+                # DON'T USE OTHER CARDS OF THE HAND (they are worth nothing) state
+                available, proba_cards, cards = self.calculate_all_possible_cards_and_prob(buffer_state, card_index, local_player_id, False, available, True) 
                 list_proba_cards.append(proba_cards)
                 list_cards.append(cards)
             
+            nb_tests = 1 # To have an idea of the time needed, and switch on another strategy if needed
+
+            for index_hand_possibility in range(len(list_cards)):
+                nb_tests *= len(list_cards[index_hand_possibility])
             res = self.enumerate_hands(list_cards)
             all_moves = observation["pyhanabi"].legal_moves()
-
+            i_ref = 10000
+            i = 0
             total = np.zeros(len(all_moves), dtype = float)
             while res is not None:
                 list_indices, current_hand = res
+                #print(".", end = " ", flush = True)
                 #print("La liste des indices:",list_indices)
                 #for i in range(5):
                 #     print("la longueur des cartes possibles en ", i, ":", len(list_cards[i]), len(list_proba_cards[i]))
                 if self.is_possible_hand(current_hand, available):
-                    
+                    i += 1
+                    if i >= i_ref:
+                        i = 0
+                        print("indices and hand:", list_indices, current_hand)
 
                     # Always the same annoying bug ...
                     for p in range(self.config["players"]):
@@ -898,8 +924,9 @@ class ExtensiveAgent(Agent):
                     total += (self.do_all_actions(all_moves, buffer_state, local_player_id, iteration_level, return_list = True) 
                         * self.hand_probability( list_indices, list_proba_cards))
 
-                res = self.enumerate_hands(list_cards, list_indices)
+                res = self.enumerate_hands(list_cards, list_indices, nb_tests)
 
+            print("Boucle terminée")
             nb_moves = len(all_moves)
             if nb_moves == 0: # Is it really possible ? 
                 print("In this case, the game is supposed to be finished !", local_player_id, iteration_level) 
