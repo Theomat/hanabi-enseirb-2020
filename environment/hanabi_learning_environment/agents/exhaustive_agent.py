@@ -96,24 +96,24 @@ def recDichoSearchCard(card, cards, i, j):
     if (j - i) > 0:
         center = (i + j) // 2
         if (
-            cards[center]["color"] == card["color"]
+            color_char_to_idx(cards[center]["color"]) == card["color"]
             and cards[center]["rank"] == card["rank"]
         ):
             return center
-        elif cards[center]["color"] == card["color"]:
+        elif color_char_to_idx(cards[center]["color"]) == card["color"]:
             if cards[center]["rank"] > card["rank"]:
                 return recDichoSearchCard(card, cards, i, center - 1)
             else:
                 return recDichoSearchCard(card, cards, center + 1, j)
         else:
-            if cards[center]["color"] > card["color"]:
+            if color_char_to_idx(cards[center]["color"]) > card["color"]:
                 return recDichoSearchCard(card, cards, i, center - 1)
             else:
                 return recDichoSearchCard(card, cards, center + 1, j)
     elif (
         j - i
     ) == 0:  # Useless, when (j - i) == -1, it will return -1 (all elements already checked)
-        if cards[i]["color"] == card["color"] and cards[i]["rank"] == card["rank"]:
+        if color_char_to_idx(cards[i]["color"]) == card["color"] and cards[i]["rank"] == card["rank"]:
             return i
     return -1
 
@@ -780,18 +780,32 @@ class ExtensiveAgent(Agent):
             proba *= list_proba_cards[card_index][indice]
         return proba
 
-    def do_all_actions(self, all_actions, state, local_player_id, iteration_level, return_list = False):
+    def do_all_actions(self, all_actions, state, local_player_id, iteration_level, return_list = False, already_probas = True):
         if return_list:
             total = np.zeros(len(all_actions), dtype = float)
         else:
             total = 0
         
-        
+        available = None
         next_local_player_id = (local_player_id + 1) % self.config["players"]
         for action_index, action in enumerate(all_actions):
                 tempo_state = state.copy() # Could be optimized a lot if a function "pop" was created (instead of cloning the entire state each time !)
+                proba_current_move = 1 #Will be used in PLAY and DISCARD moves
                 #print("game:",tempo_state._game)
                 if tempo_state.move_is_legal(action):
+                    if ((action.type() == HanabiMoveType.DISCARD 
+                        or action.type() == HanabiMoveType.PLAY) and not(already_probas)): 
+                        available = ExtensiveAgent.unseen_cards(self.produce_current_state_observation(local_player_id, tempo_state))
+                        available, probabilities, possible_cards = self.calculate_all_possible_cards_and_prob(tempo_state, action.card_index(), local_player_id, use_all_hands = False, 
+                            available = available, already_tracked_hand = False)
+                        card_to_be_played = tempo_state.player_hands()[local_player_id][action.card_index()]
+                        proba_indice = dichoSearchCard({"color": color_idx_to_char(card_to_be_played.color()), "rank": card_to_be_played.rank()}, possible_cards)
+                        if proba_indice == -1:
+                            print("LA CARTE PRESENTE DANS LA MAIN N'EST PAS PRESENTE DANS LA LISTE DES POSSIBLES !!!", 
+                                tempo_state.player_hands()[local_player_id][action.card_index()],
+                                possible_cards)
+                            return None
+                        proba_current_move = probabilities[proba_indice]
                     tempo_state.apply_move(action)
                 else:
                     print("THIS MOVE ISN'T LEGAL IN THE TEMPO_STATE:", action, tempo_state)
@@ -815,7 +829,11 @@ class ExtensiveAgent(Agent):
                     #as usual, start with random, But it's theorically useless to assure that the card we want to set isn't already used in the hand 
                     #(because we've created a plausible game at iteration 0, so we can use all the hands in the state)  
                     tempo_state.deal_random_card()
-                    available = ExtensiveAgent.unseen_cards(self.produce_current_state_observation(local_player_id, tempo_state))
+                    #TODO: reuse the previous available, but remove the just-played card from it
+                    available = ExtensiveAgent.unseen_cards(self.produce_current_state_observation(local_player_id, tempo_state)) 
+                    
+
+
                     #print("available in all_moves:",tempo_state.fireworks(),available)
                     
                     # cards which can replace the card that has been played on a PLAY or DISCARD (last card, because just drawn)
@@ -829,12 +847,13 @@ class ExtensiveAgent(Agent):
                             total[action_index] += self.calculate_expected_value( iteration_level + 1, tempo_state, next_local_player_id) * proba_cards[card_idx]
                         else:
                             total += self.calculate_expected_value( iteration_level + 1, tempo_state, next_local_player_id) * proba_cards[card_idx]
+                    total = total * proba_current_move 
                 # So a REVEAL or something else (nothing to set, only informations were revealed (easier))
                 else: 
                     if return_list:
                         total[action_index] += self.calculate_expected_value( iteration_level + 1, tempo_state, next_local_player_id)
                     else:
-                        total += self.calculate_expected_value( iteration_level + 1, tempo_state, next_local_player_id)
+                        total += self.calculate_expected_value( iteration_level + 1, tempo_state, next_local_player_id) * proba_current_move
                 next_local_player_id = (local_player_id + 1) % self.config["players"]
 
         return total
@@ -867,8 +886,8 @@ class ExtensiveAgent(Agent):
             # The same next player for each move
             
 
-            
-            total += self.do_all_actions(observation["pyhanabi"].legal_moves(), state, local_player_id, iteration_level)
+            # The probabilities for having the card in hand must be taken into account when played
+            total += self.do_all_actions(observation["pyhanabi"].legal_moves(), state, local_player_id, iteration_level, already_probas = False) 
             
 
                 
