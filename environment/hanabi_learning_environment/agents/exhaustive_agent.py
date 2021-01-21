@@ -163,86 +163,9 @@ class ExtensiveAgent(Agent):
         self.hands_initialized = False
         self.saved_observation = None
         self.previous_observation = None
-        #self.local_player_id = None
         self.offset_real_local = None # The offset to go from the real player id to the local player id (because the starting player can't be chosen precisely, only 0 or random)
-        #self.players_partial_belief = [ pb.PartialBelief(self.config["players"], 0, 0) for i in range(self.config["players"])] # The partial beliefs (only used to have
-                                                                                                                               #easily the probabilities). Every player                                                                                                      #must use its local id (for coherence)
+                                                                                                 #must use its local id (for coherence)
     
-    """def _prob_color(self, color: int, offset: int, observation) -> float:
-        total_cards = self._total_cards(offset, color=False)
-        if total_cards == 0:
-            return 0
-        total_colors = np.sum(unseen_cards(observation)[color])  # - self.virtual_colors[color] # MODIFY WITH sum(unseen_cards(observation)[color_idx])
-        return total_colors / total_cards
-
-    def _prob_rank(self, rank: int,  offset: int, observation) -> float:
-        total_cards = self._total_cards(offset, rank=False)
-        if total_cards == 0:
-            return 0
-        total_colors = np.sum(self._filtered_deck(offset)[:, rank])  # - self.virtual_ranks[rank]
-        return total_colors / total_cards
-
-    def _prob_card(self, rank: int, color: int, offset: int, observation) -> float:
-        total_cards = self._total_cards(offset, color=False, rank=False)
-        # print("Total cards=", total_cards)
-        if total_cards == 0:
-            return 0
-        total_in_deck = self.deck[color, rank] #MODIFY
-        return total_in_deck / total_cards
-
-    def _prob_card_knowing_color(self, rank: int, color: int, offset: int, observation) -> float:
-        # p1 = P(C=r & R=r)
-        # p2 = P(C=c)
-        p1 = self._prob_card(rank, color, offset, observation)
-        return p1
-
-    def _prob_card_knowing_rank(self, rank: int, color: int, offset: int, observation) -> float:
-        # p1 = P(C=r & R=r)
-        # p1 does not take into account hints
-        # p2 = P(R=R)
-        p1 = self._prob_card(rank, color, offset, observation)
-        return p1"""
-
-    #def probability(self, card_ offset: int, rank: int = -1, color: str = None, observation) -> float:
-    """
-        Computes the asked probability.
-        If only a ```color``` is specified, computes the probability of the card being of the specified ```color```.
-        If only a ```rank``` is specified, computes the probability of the card being of the specified ```rank```.
-        If no ```color``` nor ```rank``` is specified return ```1```.
-
-        Parameters
-        -----------
-        - **card_offset**: the offset of the card in you hand that you want information about
-        - **rank**: (*optional*) the rank you want information about
-        - **color**: (*optional*) the color you want information about
-
-        Return
-        -----------
-        A float in ```[0; 1]``` that specifies the probability of the specified card matching the parameters given.
-        """
-    """if rank is None:
-            rank = -1
-        card_info = self.hand[card_offset]
-        if rank == -1:
-            if color is None:
-                return 1
-            return self._prob_color(_COLOR_TO_INDEX[color], card_offset, observation)
-        elif color is None:
-            return self._prob_rank(rank, card_offset, observation)
-        else:
-            r = card_info["rank"]
-            c = card_info["color"]
-            cindex = _COLOR_TO_INDEX[color]
-            if r == rank and c == color:
-                return 1
-            elif c is None and rank == r:
-                return self._prob_card_knowing_rank(rank, cindex, card_offset, observation)
-            elif c == color and r is None:
-                return self._prob_card_knowing_color(rank, cindex, card_offset, observation)
-            elif c is None and r is None:
-                return self._prob_card(rank, cindex, card_offset, observation)
-            else:
-                return 0"""
 
     def produce_current_state_observation(self, local_player_id = None, state = None):
         if local_player_id is None:
@@ -791,6 +714,7 @@ class ExtensiveAgent(Agent):
         for action_index, action in enumerate(all_actions):
                 tempo_state = state.copy() # Could be optimized a lot if a function "pop" was created (instead of cloning the entire state each time !)
                 proba_current_move = 1 #Will be used in PLAY and DISCARD moves
+                tempo_score = 0
                 #print("game:",tempo_state._game)
                 if tempo_state.move_is_legal(action):
                     if ((action.type() == HanabiMoveType.DISCARD 
@@ -800,6 +724,7 @@ class ExtensiveAgent(Agent):
                             available = available, already_tracked_hand = False)
                         card_to_be_played = tempo_state.player_hands()[local_player_id][action.card_index()]
                         proba_indice = dichoSearchCard({"color": color_idx_to_char(card_to_be_played.color()), "rank": card_to_be_played.rank()}, possible_cards)
+                        tempo_score = ExtensiveAgent.score_game(tempo_state)
                         if proba_indice == -1:
                             print("LA CARTE PRESENTE DANS LA MAIN N'EST PAS PRESENTE DANS LA LISTE DES POSSIBLES !!!", 
                                 tempo_state.player_hands()[local_player_id][action.card_index()],
@@ -853,7 +778,7 @@ class ExtensiveAgent(Agent):
                     if return_list:
                         total[action_index] += self.calculate_expected_value( iteration_level + 1, tempo_state, next_local_player_id)
                     else:
-                        total += self.calculate_expected_value( iteration_level + 1, tempo_state, next_local_player_id) * proba_current_move
+                        total += self.calculate_expected_value( iteration_level + 1, tempo_state, next_local_player_id) * proba_current_move + tempo_score * (1-proba_current_move)
                 next_local_player_id = (local_player_id + 1) % self.config["players"]
 
         return total
@@ -975,6 +900,7 @@ class ExtensiveAgent(Agent):
         #print(observation["legal_moves"])
         #return observation["legal_moves"][chosen_random]
         expected_value = self.calculate_expected_value( 0, self.global_game_state, self.local_id(0))
+        print(expected_value)
         return observation["legal_moves"][np.argmax(expected_value)]
 
 
