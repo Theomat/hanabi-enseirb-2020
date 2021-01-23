@@ -157,7 +157,7 @@ class ExtensiveAgent(Agent):
             self.global_game, ObservationEncoderType.CANONICAL)
 
         # Both are used in the expected values computation, to limit the time needed
-        self.threshold_random = 1000
+        self.threshold_random = 500
         self.limit_tests = 0
 
         self.hands_initialized = False
@@ -613,18 +613,41 @@ class ExtensiveAgent(Agent):
 
         return obs_dict
 
-    @staticmethod
-    def score_game(state):
+    def score_game(self, state):
         """returns the game score displayed by fireworks played up to now in the game.
          for now no heuristic is used to determine which hand is the most promising for a given score"""
         score = 0
+
+        #Created only to have access to the cards knowledge, so we don't care which player is used to create it
+        #observation =  self.produce_current_state_observation(0 ,state) 
+
         fw = state.fireworks()
         for key in fw:
             score += fw[key]
+        score *= 2 #Value of a firework
+
+        knowledge_score = 0
+
+        # If an info isn't plausible, we have some knowledge
+        """for hand_index, hand in enumerate(state.player_hands()):
+            for card_index in range(len(hand)):
+                for c in range(self.config["colors"]):
+                    if not(observation["pyhanabi"].card_knowledge()[hand_index][card_index].color_plausible(c)):
+                        knowledge_score += 1
+                for k in range(self.config["ranks"]):
+                    if not(observation["pyhanabi"].card_knowledge()[hand_index][card_index].rank_plausible(k)):
+                        knowledge_score += 1           
+        score += knowledge_score * 0.01 #Value of an individual indirect hint"""
+
+        score += state.life_tokens() * 0.5
+
+        score += state.information_tokens() * 0.05
+
         return score
 
                 
-    def calculate_all_possible_cards_and_prob(self, state, card_index, local_player_id, use_all_hands = False, available = None, already_tracked_hand = False): # We will do the probas with the cards we own ourselves, except for level 0,
+    def calculate_all_possible_cards_and_prob(self, state, card_index, local_player_id, use_all_hands = False, available = None, already_tracked_hand = False): 
+                                                                        # We will do the probas with the cards we own ourselves, except for level 0,
                                                                         # because we've transformed the game into a completely known state
                                                                         # !!! BE CAREFUL, don't take into account the target card (it will be returned)
         #print("calculate_all_possible_cards_and_prob:",card_index,local_player_id, available)
@@ -633,7 +656,7 @@ class ExtensiveAgent(Agent):
         #print("Not Yet Implemented")
         possible_cards = []
         probabilities = []
-        all_cards_count = 0 #TODO: transform in float before division(not now because operations are probably slower on floats)
+        all_cards_count = 0 #Transform in float before division (not now because operations are probably slower on floats)
         if available is None:
             available_cards = ExtensiveAgent.unseen_cards(observation) # TODO: return this, so the user can reuse it without recalculating this every call
         else:
@@ -724,7 +747,7 @@ class ExtensiveAgent(Agent):
                             available = available, already_tracked_hand = False)
                         card_to_be_played = tempo_state.player_hands()[local_player_id][action.card_index()]
                         proba_indice = dichoSearchCard({"color": color_idx_to_char(card_to_be_played.color()), "rank": card_to_be_played.rank()}, possible_cards)
-                        tempo_score = ExtensiveAgent.score_game(tempo_state)
+                        tempo_score = self.score_game(tempo_state)
                         if proba_indice == -1:
                             print("LA CARTE PRESENTE DANS LA MAIN N'EST PAS PRESENTE DANS LA LISTE DES POSSIBLES !!!", 
                                 tempo_state.player_hands()[local_player_id][action.card_index()],
@@ -739,9 +762,9 @@ class ExtensiveAgent(Agent):
                 #If the game is finished after the move
                 if tempo_state.is_terminal():
                     if return_list:
-                        total[action_index] += ExtensiveAgent.score_game(tempo_state)
+                        total[action_index] += self.score_game(tempo_state)
                     else:
-                      total += ExtensiveAgent.score_game(tempo_state)
+                      total += self.score_game(tempo_state)
                     continue
                 
                 #An observation from the same player, but he hasn't the play, because he just played ! (TODO: if not used at all in REVEAL case, move it in the "if" condition)
@@ -801,7 +824,7 @@ class ExtensiveAgent(Agent):
         # THE STATE MUST NOT BE TOUCHED !
 
         if iteration_level >= self.max_iteration or state.is_terminal(): #TODO: In theory, not for iteration_level == 0, but maybe take into account this
-            return ExtensiveAgent.score_game(state) # We will do the wheighted mean score of all children, so we have to return it
+            return self.score_game(state) # We will do the wheighted mean score of all children, so we have to return it
 
         observation =  self.produce_current_state_observation(local_player_id, state)
 
@@ -819,7 +842,7 @@ class ExtensiveAgent(Agent):
             nb_moves = len(observation["pyhanabi"].legal_moves())
             if nb_moves == 0: # Is it really possible ? 
                 print("In this case, the game is supposed to be finished !", local_player_id, iteration_level) 
-                total = ExtensiveAgent.score_game(state)
+                total = self.score_game(state)
             else:
                 #total = total / float(nb_moves)
                 pass
@@ -896,11 +919,10 @@ class ExtensiveAgent(Agent):
         b = self.prepare_global_game_state(observation)
         if b == -1:
             return  -1
-        chosen_random = random.randint(0,len(observation["legal_moves"]) - 1)
-        #print(observation["legal_moves"])
-        #return observation["legal_moves"][chosen_random]
+
         expected_value = self.calculate_expected_value( 0, self.global_game_state, self.local_id(0))
         print(expected_value)
+        print("global legal moves:",observation["pyhanabi"].legal_moves())
         return observation["legal_moves"][np.argmax(expected_value)]
 
 
