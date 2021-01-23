@@ -1,71 +1,4 @@
 """Extensive search of all possible moves, """
-# On peut, outre le score de partie basique, donner plus de poids à d'autres choses (donc créer une heuristique) -> indices valent des points par exemple,
-#ou score non-linéaire (poser le 5 vaut plus que poser le 2)
-""" memo:                       {'current_player': 0,
-                                  'current_player_offset': 0,
-                                  'deck_size': 40,
-                                  'discard_pile': [],
-                                  'fireworks': {'B': 0,
-                                                'G': 0,
-                                                'R': 0,
-                                                'W': 0,
-                                                'Y': 0},
-                                  'information_tokens': 8,
-                                  'legal_moves': [{'action_type': 'PLAY',
-                                                   'card_index': 0},
-                                                  {'action_type': 'PLAY',
-                                                   'card_index': 1},
-                                                  {'action_type': 'PLAY',
-                                                   'card_index': 2},
-                                                  {'action_type': 'PLAY',
-                                                   'card_index': 3},
-                                                  {'action_type': 'PLAY',
-                                                   'card_index': 4},
-                                                  {'action_type':
-                                                  'REVEAL_COLOR',
-                                                   'color': 'R',
-                                                   'target_offset': 1},
-                                                  {'action_type':
-                                                  'REVEAL_COLOR',
-                                                   'color': 'G',
-                                                   'target_offset': 1},
-                                                  {'action_type':
-                                                  'REVEAL_COLOR',
-                                                   'color': 'B',
-                                                   'target_offset': 1},
-                                                  {'action_type': 'REVEAL_RANK',
-                                                   'rank': 0,
-                                                   'target_offset': 1},
-                                                  {'action_type': 'REVEAL_RANK',
-                                                   'rank': 1,
-                                                   'target_offset': 1},
-                                                  {'action_type': 'REVEAL_RANK',
-                                                   'rank': 2,
-                                                   'target_offset': 1}],
-                                  'life_tokens': 3,
-                                  'observed_hands': [[{'color': None, 'rank':
-                                  -1},
-                                                      {'color': None, 'rank':
-                                                      -1},
-                                                      {'color': None, 'rank':
-                                                      -1},
-                                                      {'color': None, 'rank':
-                                                      -1},
-                                                      {'color': None, 'rank':
-                                                      -1}],
-                                                     [{'color': 'G', 'rank': 2},
-                                                      {'color': 'R', 'rank': 0},
-                                                      {'color': 'R', 'rank': 1},
-                                                      {'color': 'B', 'rank': 0},
-                                                      {'color': 'R', 'rank':
-                                                      1}]],
-                                  'num_players': 2,
-                                  'vectorized': [ 0, 0, 1, ... ]}
-"""
-#bool GetDealSpecificMove(int card_index, int player, int color, int rank, pyhanabi_move_t* move)
-
-# TODO: use " HanabiState : get_deal_specific_move(card_index, player, color, rank) " in conjunction with " HanabiState : apply_move(self, move)" from " pyhanabi.py "
-# and maybe " HanabiState : copy(self) " (to save before a move, but it's pretty heavy to do it before every move)
 
 import sys
 import os
@@ -74,20 +7,13 @@ import math
 import copy
 import random 
 import time
-#DOSSIER_COURANT = os.path.dirname(os.path.abspath(__file__))
-#DOSSIER_PARENT = os.path.dirname(DOSSIER_COURANT)
-#print(DOSSIER_PARENT)
-#sys.path.append(DOSSIER_PARENT) sleep print
 
-
-#from hanabi_learning_environment import pyhanabi
 from hanabi_learning_environment import pyhanabi
 from hanabi_learning_environment.rl_env import Agent
 from hanabi_learning_environment.pyhanabi import color_char_to_idx, color_idx_to_char
 from hanabi_learning_environment.pyhanabi import HanabiGame, HanabiState, HanabiMoveType, HanabiMove
 from hanabi_learning_environment.pyhanabi import CHANCE_PLAYER_ID
-import hanabi_learning_environment.partial_belief as pb # Remember to use update function
-#from hanabi_learning_environment
+import hanabi_learning_environment.partial_belief as pb 
 from hanabi_learning_environment.pyhanabi import ObservationEncoder, ObservationEncoderType
 
 
@@ -112,7 +38,7 @@ def recDichoSearchCard(card, cards, i, j):
                 return recDichoSearchCard(card, cards, center + 1, j)
     elif (
         j - i
-    ) == 0:  # Useless, when (j - i) == -1, it will return -1 (all elements already checked)
+    ) == 0:
         if color_char_to_idx(cards[i]["color"]) == card["color"] and cards[i]["rank"] == card["rank"]:
             return i
     return -1
@@ -147,6 +73,7 @@ class ExtensiveAgent(Agent):
 
         self.config = config
         print("La configuration de la game:", config)
+
         # Extract max info tokens or set default to 8.
         self.max_information_tokens = config.get("information_tokens", 8)
         self.max_iteration = config.get("max_iteration", 2)
@@ -157,7 +84,7 @@ class ExtensiveAgent(Agent):
             self.global_game, ObservationEncoderType.CANONICAL)
 
         # Both are used in the expected values computation, to limit the time needed
-        self.threshold_random = 1
+        self.threshold_random = 500
         self.limit_tests = 0
 
         self.profile_time = {"unseen_cards": 0, "score_game": 0, "calculate_all_possible_cards_and_prob": 0, "enumerate_hands": 0, "do_all_actions": 0, "copy": 0, "produce_current_state_observation": 0}
@@ -165,8 +92,9 @@ class ExtensiveAgent(Agent):
         self.hands_initialized = False
         self.saved_observation = None
         self.previous_observation = None
-        self.offset_real_local = None # The offset to go from the real player id to the local player id (because the starting player can't be chosen precisely, only 0 or random)
-                                                                                                 #must use its local id (for coherence)
+        self.offset_real_local = None # The offset to go from the real player id to the local player id 
+                                      #(because the starting player can't be chosen precisely, only 0 or random)
+                                      #must use its local id (for coherence)
     
 
     def produce_current_state_observation(self, local_player_id = None, state = None):
@@ -180,7 +108,6 @@ class ExtensiveAgent(Agent):
             self.profile_time["produce_current_state_observation"] += time.time() - ref_time
     
     def assure_agent_hand_compatible(self, card_to_verify, available = None, player_offset = 0):
-        #print("assure_agent_hand_compatible debut:", available, self.global_game_state.player_hands, card_to_verify ,flush = True)
         verif_color = color_char_to_idx(card_to_verify["color"])
         verif_rank = card_to_verify["rank"]
         player_local_id = (player_offset + self.local_id(0)) % self.config["players"] 
@@ -188,6 +115,7 @@ class ExtensiveAgent(Agent):
             available_cards = ExtensiveAgent.unseen_cards(self.produce_current_state_observation())
         else:
             available_cards = available
+
         # We only need to free one instance of card_to_verify at each call, so we can stop after that (if it's needed)
         for n, card in enumerate(self.global_game_state.player_hands()[player_local_id]):
             if card.color() == verif_color and card.rank() == verif_rank:
@@ -198,10 +126,8 @@ class ExtensiveAgent(Agent):
                                 available_cards[i][j] -= 1 # We just decided to take it
                                 available_cards[verif_color][verif_rank] += 1 # We just freed it
                                 for k in range(self.config["players"]):
-                                    #print(self.global_game_state.player_hands(), k, k, k, k)
                                     self.global_game_state.set_individual_card(player_local_id, n, 
                                         {"color": color_idx_to_char(i), "rank": j})
-                                #print("assure_agent_hand_compatible fin:", available, self.global_game_state.player_hands, flush = True)
                                 return available_cards
             
         return available_cards
@@ -224,7 +150,7 @@ class ExtensiveAgent(Agent):
                 
         return count
     
-    def select_card(self, condition, respect_condition, type_of_condition, l): # TODO: Check the current hand 
+    def select_card(self, condition, respect_condition, type_of_condition, l):
         """ If respect_condition == True, give a good card, if not, give a bad card (relative to the condition). """
 
         for i in range(len(l)):
@@ -242,7 +168,6 @@ class ExtensiveAgent(Agent):
 
     
     def draw_good_card(self, local_id, observation):
-        #print("Starting draw_good_card:", local_id)
 
         # If there's no more card, we can't give a card
         if self.global_game_state.deck_size() == 0:
@@ -258,9 +183,8 @@ class ExtensiveAgent(Agent):
         
         # If not, it is the agent, and we don't know which card to give 
         if relative != 0:
-            for card in self.global_game_state.player_hands()[self.local_id(0)]: #TODO: hand = agent hand
+            for card in self.global_game_state.player_hands()[self.local_id(0)]:
                 available_cards[card.color()][card.rank()] -= 1
-            #print("Qu'est ce que c'est que cette erreur sur la couleur ?:",observation["observed_hands"][relative][-1], flush = True)
             self.assure_agent_hand_compatible(observation["observed_hands"][relative][-1], available_cards)
             # The same bug explanation for this loop
             card_to_set = observation["observed_hands"][relative][-1]
@@ -278,11 +202,6 @@ class ExtensiveAgent(Agent):
             hand_to_be_set = []
             all_cards_in_hand = self.global_game_state.player_hands()[self.local_id(0)]
             possible_cards = ExtensiveAgent.unseen_cards(self.produce_current_state_observation()) 
-            #print("Possible cards:", possible_cards)
-
-            #TODO: CHECK IF NECESSARY, BECAUSE CAN CRASH IN END-GAME !!! We reserve the cards currently in hand (maybe not necessary)
-            #for card in all_cards_in_hand:
-            #    possible_cards[card.color()][card.rank()] -= 1
             player_knowledge = observation["pyhanabi"].card_knowledge()[relative]
             for n, card_knowledge in enumerate(player_knowledge):
                 card = None
@@ -297,17 +216,12 @@ class ExtensiveAgent(Agent):
                     else:
                         possible_cards, card = self.select_card(value, False, type_of_reveal, possible_cards)
                 else:
-                    #print("Bad reveal_type in prepare_hand:", local_id, observation, type_of_reveal, value, flush=True)
                     return -1
-                #possible_cards[all_cards_in_hand[n].color()][all_cards_in_hand[n].rank()] += 1
                 if card is not None:
                     hand_to_be_set.append(card)
                 else:
-                    #TODO: This case must be treated, by replacing the already present cards in hand (assure_agent_hand_compatible function ?)
                     print("Pas assez de carte pour compléter la main correctement:", hand_to_be_set, possible_cards, flush=True)
                     return -1
-            #print("Hand to be set:", hand_to_be_set, flush = True)
-            #time.sleep(1)
             for i in range(self.config["players"]):
                 self.global_game_state.set_hand(local_id, hand_to_be_set)
 
@@ -339,14 +253,14 @@ class ExtensiveAgent(Agent):
                 self.global_game_state.deal_random_card()
 
             # The number of players who have played before the first call
-            self.offset_real_local = ExtensiveAgent.count_real_moves(obs_pyhanabi.last_moves()) # Mayb another way ?
+            self.offset_real_local = ExtensiveAgent.count_real_moves(obs_pyhanabi.last_moves()) # Maybe another way ?
 
             current_player = self.global_game_state.cur_player()
 
             print("Avant l'initialisation", flush = True)
             print(self.global_game_state.player_hands(), flush = True)
 
-            #Possible probleme si on a 9 joueurs (donc pas de deck, mais on s'en fiche un peu)
+            #Possible probleme with 9 players, but we never play with that many players
             available_cards = ExtensiveAgent.unseen_cards(self.produce_current_state_observation())
 
 
@@ -381,7 +295,6 @@ class ExtensiveAgent(Agent):
 
                 # Our hand is invalid, so we start from the 2nd player 
                 if i != 0:
-                    #print("The current hands on the board, and the hand to be set:", self.global_game_state.player_hands(), hand)
                     self.global_game_state.set_hand(self.local_id(i), hand)
 
             #There's a bug in set_hand, so we have to correct the current_player by setting another time the last hand
@@ -399,9 +312,6 @@ class ExtensiveAgent(Agent):
         print("Starting the generalpart of building", flush = True)
         ################## GENERAL PART ###################
         for current_history_item in last_moves_ordered:
-            #print("Current history item:", current_history_item, flush = True)
-            #print("Current Local player (to play):", self.global_game_state.cur_player())
-            #print("Offset real / local (so the id of the agent):", self.offset_real_local, self.local_id(0))
 
             current_move = current_history_item.move()
             current_move_type = current_move.type()
@@ -415,11 +325,8 @@ class ExtensiveAgent(Agent):
             
             
 
-            if current_move_type == HanabiMoveType.PLAY: # TODO: put the good cards in hand
-                #print("Entering the PLAY condition", flush = True)
+            if current_move_type == HanabiMoveType.PLAY:
                 if self.global_game_state.move_is_legal(current_move):
-                    #print("PLAY condition verified", flush = True)
-
                     if relative_player == 0:
                         for i in range(self.config["players"]):
                             card = {"color": color_idx_to_char(current_history_item.color()), "rank": current_history_item.rank()}
@@ -432,27 +339,18 @@ class ExtensiveAgent(Agent):
                             available_cards = self.assure_agent_hand_compatible(card, available_cards)
                             self.global_game_state.set_individual_card(current_local_player, current_move.card_index(), 
                                 card)
-                            #print("PLAY move hand changed successfully", flush = True)
-                    #time.sleep(1)
-
-                    #print("LOCAL PLAYER ID BEFORE MOVE:", self.global_game_state.cur_player(), flush = True)
-                    #print("LEGAL MOVES:", self. global_game_state.legal_moves())
                     self.global_game_state.apply_move(current_move)
-                    #print("PLAY move applied successfully", flush = True)
                     self.draw_good_card(current_local_player, observation)
                     
                 else:
                     print("The PLAY move given isn't legal:", current_move, flush = True)
                     return -1
 
-            elif current_move_type == HanabiMoveType.DISCARD: # TODO: put the good cards in hand
-                #print("Entering the DISCARD condition", flush = True)
+            elif current_move_type == HanabiMoveType.DISCARD:
                 if self.global_game_state.move_is_legal(current_move):
-                    #print("DISCARD condition verified", flush = True)
                     if relative_player == 0:
                         for i in range(self.config["players"]):
                             card = {"color": color_idx_to_char(current_history_item.color()), "rank": current_history_item.rank()}
-                            #print("GENERAL, card to bet set:", card)
                             available_cards = ExtensiveAgent.unseen_cards(self.produce_current_state_observation())
                             hand = self.global_game_state.player_hands()[self.local_id(0)] # The agent's hand
                             # Preparing the available cards by reserving the useful ones
@@ -461,13 +359,8 @@ class ExtensiveAgent(Agent):
                             available_cards = self.assure_agent_hand_compatible(card, available_cards)
                             self.global_game_state.set_individual_card(current_local_player, current_move.card_index(), 
                                 card)
-                            #print("DISCARD move hand changed successfully", flush = True)
-                    #time.sleep(1)
                     
-                    #print("LOCAL PLAYER ID BEFORE MOVE:", self.global_game_state.cur_player(), flush = True)
-                    #print("LEGAL MOVES:", self. global_game_state.legal_moves())
                     self.global_game_state.apply_move(current_move)
-                    #print("DISCARD move applied successfully", flush = True)
                     self.draw_good_card(current_local_player, observation)
                     
                 else:
@@ -475,36 +368,18 @@ class ExtensiveAgent(Agent):
                     return -1
 
             elif current_move_type == HanabiMoveType.REVEAL_RANK:
-                #print("Entering the REVEAL_RANK condition", flush = True)
-
                 self.prepare_hand((current_local_player + current_move.target_offset()) % self.config["players"] , observation, "rank", current_move.rank())
-                #time.sleep(1)
-                #print("REVEAL_RANK hand set successfully", flush = True)
                 if self.global_game_state.move_is_legal(current_move):
-                    #time.sleep(1)
-                    #print("REVEAL_RANK condition verified", flush = True)
-                    #print("LOCAL PLAYER ID BEFORE MOVE:", self.global_game_state.cur_player(), flush = True)
-                    self.global_game_state.apply_move(current_move)
-                    #print("REVEAL_RANK move applied successfully", flush = True)
-                    
+                    self.global_game_state.apply_move(current_move)        
                 else:
                     print("The REVEAL_RANK move given isn't legal:", current_move, flush = True)
                     return -1
 
             elif current_move_type == HanabiMoveType.REVEAL_COLOR:
-                #print("Entering the REVEAL_COLOR condition", flush = True)
-
-                
                 self.prepare_hand((current_local_player + current_move.target_offset()) % self.config["players"] , observation, "color", current_move.color())
-                #time.sleep(1)
-                #print("REVEAL_COLOR hand set successfully", flush = True)
                 if self.global_game_state.move_is_legal(current_move):
-                    #time.sleep(1)
-                    #print("REVEAL_COLOR condition verified", flush = True)
-                    #print("LOCAL PLAYER ID BEFORE MOVE:", self.global_game_state.cur_player(), flush = True)
                     self.global_game_state.apply_move(current_move)
-                    #print("REVEAL_COLOR move applied successfully", flush = True)
-                    
+
                 else:
                     print("The REVEAL_COLOR move given isn't legal:", current_move, flush = True)
                     return -1
@@ -549,7 +424,6 @@ class ExtensiveAgent(Agent):
             for card in observation["observed_hands"][i + 1]:
                 currently_unseen_cards[color_char_to_idx(card["color"])][card["rank"]] -= 1
         for key in observation["fireworks"]:
-            #print(observation["fireworks"], flush = True)
             for j in range(observation["fireworks"][key]):
                 currently_unseen_cards[color_char_to_idx(key)][j] -= 1
 
@@ -591,7 +465,6 @@ class ExtensiveAgent(Agent):
         obs_dict["legal_moves_as_int"] = []
         for move in observation.legal_moves():
           obs_dict["legal_moves"].append(move.to_dict())
-          #obs_dict["legal_moves_as_int"].append(self.global_game.get_move_uid(move))
 
         obs_dict["observed_hands"] = []
         for player_hand in observation.observed_hands():
@@ -616,7 +489,6 @@ class ExtensiveAgent(Agent):
             player_hints_as_dicts.append(hint_d)
           obs_dict["card_knowledge"].append(player_hints_as_dicts)
 
-        # ipdb.set_trace()
         obs_dict["vectorized"] = self.observation_encoder.encode(observation)
         obs_dict["pyhanabi"] = observation
 
@@ -624,7 +496,7 @@ class ExtensiveAgent(Agent):
 
     def score_game(self, state):
         """returns the game score displayed by fireworks played up to now in the game.
-         for now no heuristic is used to determine which hand is the most promising for a given score"""
+        There's a really simple heuristic."""
         ref_time = time.time()
         score = 0
 
@@ -649,7 +521,7 @@ class ExtensiveAgent(Agent):
                         knowledge_score += 1           
         score += knowledge_score * 0.01 #Value of an individual indirect hint"""
 
-        score += state.life_tokens() * 0.5
+        score += state.life_tokens() * 1
 
         score += state.information_tokens() * 0.05
 
@@ -662,8 +534,7 @@ class ExtensiveAgent(Agent):
                                                                         # We will do the probas with the cards we own ourselves, except for level 0,
                                                                         # because we've transformed the game into a completely known state
                                                                         # !!! BE CAREFUL, don't take into account the target card (it will be returned)
-        #print("calculate_all_possible_cards_and_prob:",card_index,local_player_id, available)
-        #TODO: assure that sum(probas) = 1 ! (normalize if needed)
+        # This function is the reason why the agent is so slow, but I can't thing of a quick fix, and I don't have the time to rework everything
 
         ref_time = time.time()
 
@@ -687,10 +558,9 @@ class ExtensiveAgent(Agent):
                 # Use all the cards in the hand, except the card we want to change
                 if card_index != current_card_index:
                     available_cards[current_card.color()][current_card.rank()] -= 1
-            #print("Maintenant ca doit y être:", available_cards)
         
 
-        ####################### The part where we use the hints #######################
+        ####################### The part where we use the hints ####################### (the really long part)
         ref_time_2 = time.time()
         for c in range(self.config["colors"]):
             if observation["pyhanabi"].card_knowledge()[0][card_index].color_plausible(c): # 0 because it's from our point of view !
@@ -710,7 +580,7 @@ class ExtensiveAgent(Agent):
         return available_cards, probabilities, possible_cards
 
 
-    def enumerate_hands(self, possible_cards_in_each_position, current_indices_hand = None, nb_tests = 0): #, current_tested_hand
+    def enumerate_hands(self, possible_cards_in_each_position, current_indices_hand = None, nb_tests = 0):
         """ Use the current tested hand indices, the observation and the possible cards in each hand position to return the next hand to be tested
 
         current_indices_hand is used to remember indices of the possible_cards_in_each_position 2D list, so we don't have to loose time searching
@@ -768,7 +638,6 @@ class ExtensiveAgent(Agent):
 
                 proba_current_move = 1 #Will be used in PLAY and DISCARD moves
                 tempo_score = 0
-                #print("game:",tempo_state._game)
                 if tempo_state.move_is_legal(action):
                     if ((action.type() == HanabiMoveType.DISCARD 
                         or action.type() == HanabiMoveType.PLAY) and not(already_probas)): 
@@ -809,14 +678,10 @@ class ExtensiveAgent(Agent):
                     #as usual, start with random, But it's theorically useless to assure that the card we want to set isn't already used in the hand 
                     #(because we've created a plausible game at iteration 0, so we can use all the hands in the state)  
                     tempo_state.deal_random_card()
-                    #TODO: reuse the previous available, but remove the just-played card from it
+                    #TODO: reuse the previous available, but remove the just-played card from it (little optimization)
                     ref_time = time.time()
                     available = ExtensiveAgent.unseen_cards(self.produce_current_state_observation(local_player_id, tempo_state)) 
                     self.profile_time["unseen_cards"] += -ref_time+time.time()
-                    
-
-
-                    #print("available in all_moves:",tempo_state.fireworks(),available)
                     
                     # cards which can replace the card that has been played on a PLAY or DISCARD (last card, because just drawn)
                     _, proba_cards, cards = self.calculate_all_possible_cards_and_prob(tempo_state, self.config["hand_size"] - 1, local_player_id, True, available, False) 
@@ -824,7 +689,7 @@ class ExtensiveAgent(Agent):
 
                         # Always the same annoying bug ...
                         for p in range(self.config["players"]):
-                            tempo_state.set_individual_card(local_player_id, self.config["hand_size"] - 1, card_possible) #Please be okay ;^;
+                            tempo_state.set_individual_card(local_player_id, self.config["hand_size"] - 1, card_possible)
                         if return_list:
                             total[action_index] += self.calculate_expected_value( iteration_level + 1, tempo_state, next_local_player_id) * proba_cards[card_idx]
                         else:
@@ -841,7 +706,6 @@ class ExtensiveAgent(Agent):
         return total
 
     def is_possible_hand(self, current_hand, available_cards):
-        #print("is_possible_hand debug:", current_hand, available_cards)
         test = np.zeros((self.config["colors"], self.config["hand_size"]), dtype = int)
 
         for card in current_hand:
@@ -857,17 +721,14 @@ class ExtensiveAgent(Agent):
     def calculate_expected_value(self, iteration_level, state, local_player_id):
         # THE STATE MUST NOT BE TOUCHED !
 
-        if iteration_level >= self.max_iteration or state.is_terminal(): #TODO: In theory, not for iteration_level == 0, but maybe take into account this
-            return self.score_game(state) # We will do the wheighted mean score of all children, so we have to return it
+        if iteration_level >= self.max_iteration or state.is_terminal():
+            return self.score_game(state) # We will do the wheighted score of all children, so we have to return it
 
         observation =  self.produce_current_state_observation(local_player_id, state)
 
         if iteration_level != 0:
             total = 0
-            #print("Secondary player")
-            # The same next player for each move
             
-
             # The probabilities for having the card in hand must be taken into account when played
             ref_time = time.time()
             total += self.do_all_actions(observation["pyhanabi"].legal_moves(), state, local_player_id, iteration_level, already_probas = False) 
@@ -879,7 +740,6 @@ class ExtensiveAgent(Agent):
                 print("In this case, the game is supposed to be finished !", local_player_id, iteration_level) 
                 total = self.score_game(state)
             else:
-                #total = total / float(nb_moves)
                 pass
 
             return total
@@ -895,7 +755,7 @@ class ExtensiveAgent(Agent):
             
             available = None
             for card_index in range(self.config["hand_size"]):
-                # DON'T USE OTHER CARDS OF THE HAND (they are worth nothing) state
+                # DON'T USE OTHER CARDS OF THE HAND (they are worth nothing)
                 available, proba_cards, cards = self.calculate_all_possible_cards_and_prob(buffer_state, card_index, local_player_id, False, available, True) 
                 list_proba_cards.append(proba_cards)
                 list_cards.append(cards)
@@ -911,10 +771,6 @@ class ExtensiveAgent(Agent):
             total = np.zeros(len(all_moves), dtype = float)
             while res is not None:
                 list_indices, current_hand = res
-                #print(".", end = " ", flush = True)
-                #print("La liste des indices:",list_indices)
-                #for i in range(5):
-                #     print("la longueur des cartes possibles en ", i, ":", len(list_cards[i]), len(list_proba_cards[i]))
                 if self.is_possible_hand(current_hand, available):
                     i += 1
                     if i >= i_ref:
@@ -936,7 +792,6 @@ class ExtensiveAgent(Agent):
                 print("In this case, the game is supposed to be finished !", local_player_id, iteration_level) 
                 total = []
             else:
-                #total = total / float(nb_moves)
                 pass
 
             return total 
@@ -945,7 +800,6 @@ class ExtensiveAgent(Agent):
     def act(self, observation):
         """Act based on an observation."""
         # The agent only plays on its turn
-        # MEMO: produce_current_state_observation(self, local_player_id = None, state = None)
         self.profile_time = {"unseen_cards": 0, "score_game": 0, "calculate_all_possible_cards_and_prob": 0, "enumerate_hands": 0, "do_all_actions": 0, "copy": 0, "produce_current_state_observation": 0, "calculate_all_possible_cards_and_prob HINTS ONLY": 0}
         if not(self.hands_initialized):
             self.saved_observation = observation
