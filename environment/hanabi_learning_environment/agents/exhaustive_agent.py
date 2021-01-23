@@ -157,8 +157,10 @@ class ExtensiveAgent(Agent):
             self.global_game, ObservationEncoderType.CANONICAL)
 
         # Both are used in the expected values computation, to limit the time needed
-        self.threshold_random = 500
+        self.threshold_random = 1
         self.limit_tests = 0
+
+        self.profile_time = {"unseen_cards": 0, "score_game": 0, "calculate_all_possible_cards_and_prob": 0, "enumerate_hands": 0, "do_all_actions": 0, "copy": 0, "produce_current_state_observation": 0}
 
         self.hands_initialized = False
         self.saved_observation = None
@@ -173,7 +175,9 @@ class ExtensiveAgent(Agent):
         if state is None:
             return self._extract_dict_from_backend(local_player_id, self.global_game_state.observation(local_player_id))
         else:
+            ref_time = time.time()
             return self._extract_dict_from_backend(local_player_id, state.observation(local_player_id), state)
+            self.profile_time["produce_current_state_observation"] += time.time() - ref_time
     
     def assure_agent_hand_compatible(self, card_to_verify, available = None, player_offset = 0):
         #print("assure_agent_hand_compatible debut:", available, self.global_game_state.player_hands, card_to_verify ,flush = True)
@@ -530,6 +534,7 @@ class ExtensiveAgent(Agent):
 
     @staticmethod
     def unseen_cards(observation):
+
         currently_unseen_cards = np.array([
             [3, 2, 2, 2, 1],
             [3, 2, 2, 2, 1],
@@ -547,8 +552,12 @@ class ExtensiveAgent(Agent):
             #print(observation["fireworks"], flush = True)
             for j in range(observation["fireworks"][key]):
                 currently_unseen_cards[color_char_to_idx(key)][j] -= 1
+
+        
+
         return currently_unseen_cards
     
+
     def _extract_dict_from_backend(self, player_id, observation, state = None): # Copied from rl_env !
         """Extract a dict of features from an observation from the backend.
 
@@ -616,6 +625,7 @@ class ExtensiveAgent(Agent):
     def score_game(self, state):
         """returns the game score displayed by fireworks played up to now in the game.
          for now no heuristic is used to determine which hand is the most promising for a given score"""
+        ref_time = time.time()
         score = 0
 
         #Created only to have access to the cards knowledge, so we don't care which player is used to create it
@@ -643,6 +653,8 @@ class ExtensiveAgent(Agent):
 
         score += state.information_tokens() * 0.05
 
+        self.profile_time["score_game"] += -ref_time+time.time()
+
         return score
 
                 
@@ -652,13 +664,19 @@ class ExtensiveAgent(Agent):
                                                                         # !!! BE CAREFUL, don't take into account the target card (it will be returned)
         #print("calculate_all_possible_cards_and_prob:",card_index,local_player_id, available)
         #TODO: assure that sum(probas) = 1 ! (normalize if needed)
+
+        ref_time = time.time()
+
+
         observation = self.produce_current_state_observation(local_player_id, state) #Check if the observation given is correct
-        #print("Not Yet Implemented")
+
         possible_cards = []
         probabilities = []
         all_cards_count = 0 #Transform in float before division (not now because operations are probably slower on floats)
         if available is None:
+            ref_time_1 = time.time()
             available_cards = ExtensiveAgent.unseen_cards(observation) # TODO: return this, so the user can reuse it without recalculating this every call
+            self.profile_time["unseen_cards"] += -ref_time_1+time.time()
         else:
             available_cards = available
 
@@ -673,7 +691,7 @@ class ExtensiveAgent(Agent):
         
 
         ####################### The part where we use the hints #######################
-
+        ref_time_2 = time.time()
         for c in range(self.config["colors"]):
             if observation["pyhanabi"].card_knowledge()[0][card_index].color_plausible(c): # 0 because it's from our point of view !
                 for k in range(self.config["ranks"]):
@@ -686,6 +704,9 @@ class ExtensiveAgent(Agent):
 
         all_cards_count = float(all_cards_count) # If == 0, the list comprehension will not explode, because there will be no elements to create anyway
         probabilities = [proba / all_cards_count for proba in probabilities]
+        self.profile_time["calculate_all_possible_cards_and_prob HINTS ONLY"] += time.time() - ref_time_2
+        self.profile_time["calculate_all_possible_cards_and_prob"] += -ref_time+time.time()
+
         return available_cards, probabilities, possible_cards
 
 
@@ -694,10 +715,11 @@ class ExtensiveAgent(Agent):
 
         current_indices_hand is used to remember indices of the possible_cards_in_each_position 2D list, so we don't have to loose time searching
         for current tested cards at each call."""
-
+        ref_time = time.time()
         #If it's the first call, we give the first hand
         if current_indices_hand is None:
             current_indices_hand = [0] * self.config["hand_size"]
+            self.profile_time["enumerate_hands"] += -ref_time+time.time()
             return current_indices_hand, [possible_cards_in_each_position[i][current_indices_hand[i]] for i in range(self.config["hand_size"])]
         
         if nb_tests < self.threshold_random:
@@ -708,16 +730,20 @@ class ExtensiveAgent(Agent):
                     current_indices_hand[current_position] = 0
                     current_position += 1
                     if current_position >= self.config["hand_size"]:
+                        self.profile_time["enumerate_hands"] += -ref_time+time.time()
                         return None # All the hands have been tested
                 else:
+                    self.profile_time["enumerate_hands"] += -ref_time+time.time()
                     return current_indices_hand, [possible_cards_in_each_position[i][current_indices_hand[i]] for i in range(self.config["hand_size"])]
         
         else:
             if self.limit_tests >= self.threshold_random:
                 self.limit_tests = 0
+                self.profile_time["enumerate_hands"] += -ref_time+time.time()
                 return None
             self.limit_tests += 1
             new_indices = [ random.randint(0, len(possible_cards_in_each_position[i]) - 1) for i in range(len(current_indices_hand))]
+            self.profile_time["enumerate_hands"] += -ref_time+time.time()
             return new_indices, [possible_cards_in_each_position[i][new_indices[i]] for i in range(self.config["hand_size"])]
 
     def hand_probability(self, current_indices_hand, list_proba_cards):
@@ -727,6 +753,7 @@ class ExtensiveAgent(Agent):
         return proba
 
     def do_all_actions(self, all_actions, state, local_player_id, iteration_level, return_list = False, already_probas = True):
+
         if return_list:
             total = np.zeros(len(all_actions), dtype = float)
         else:
@@ -735,14 +762,19 @@ class ExtensiveAgent(Agent):
         available = None
         next_local_player_id = (local_player_id + 1) % self.config["players"]
         for action_index, action in enumerate(all_actions):
+                ref_time = time.time()
                 tempo_state = state.copy() # Could be optimized a lot if a function "pop" was created (instead of cloning the entire state each time !)
+                self.profile_time["copy"] += -ref_time+time.time()
+
                 proba_current_move = 1 #Will be used in PLAY and DISCARD moves
                 tempo_score = 0
                 #print("game:",tempo_state._game)
                 if tempo_state.move_is_legal(action):
                     if ((action.type() == HanabiMoveType.DISCARD 
                         or action.type() == HanabiMoveType.PLAY) and not(already_probas)): 
+                        ref_time = time.time()
                         available = ExtensiveAgent.unseen_cards(self.produce_current_state_observation(local_player_id, tempo_state))
+                        self.profile_time["unseen_cards"] += -ref_time+time.time()
                         available, probabilities, possible_cards = self.calculate_all_possible_cards_and_prob(tempo_state, action.card_index(), local_player_id, use_all_hands = False, 
                             available = available, already_tracked_hand = False)
                         card_to_be_played = tempo_state.player_hands()[local_player_id][action.card_index()]
@@ -778,7 +810,9 @@ class ExtensiveAgent(Agent):
                     #(because we've created a plausible game at iteration 0, so we can use all the hands in the state)  
                     tempo_state.deal_random_card()
                     #TODO: reuse the previous available, but remove the just-played card from it
+                    ref_time = time.time()
                     available = ExtensiveAgent.unseen_cards(self.produce_current_state_observation(local_player_id, tempo_state)) 
+                    self.profile_time["unseen_cards"] += -ref_time+time.time()
                     
 
 
@@ -835,8 +869,9 @@ class ExtensiveAgent(Agent):
             
 
             # The probabilities for having the card in hand must be taken into account when played
+            ref_time = time.time()
             total += self.do_all_actions(observation["pyhanabi"].legal_moves(), state, local_player_id, iteration_level, already_probas = False) 
-            
+            self.profile_time["do_all_actions"] += -ref_time+time.time()
 
                 
             nb_moves = len(observation["pyhanabi"].legal_moves())
@@ -851,8 +886,10 @@ class ExtensiveAgent(Agent):
         else:
             print("Calculate_expected_value list else")
             # For each possible hand: # More optimized to iterate on hands, because it's harder to compute
+            ref_time = time.time()
             buffer_state = state.copy() # Only used to switch hands, to not touch the real state ! (Don't create weird errors)
-            
+            self.profile_time["copy"] += -ref_time+time.time()
+
             list_scores = []
             list_proba_cards, list_cards = [], []
             
@@ -887,10 +924,10 @@ class ExtensiveAgent(Agent):
                     # Always the same annoying bug ...
                     for p in range(self.config["players"]):
                         buffer_state.set_hand(local_player_id, current_hand)
-
+                    ref_time = time.time()
                     total += (self.do_all_actions(all_moves, buffer_state, local_player_id, iteration_level, return_list = True) 
                         * self.hand_probability( list_indices, list_proba_cards))
-
+                    self.profile_time["do_all_actions"] += -ref_time+time.time()
                 res = self.enumerate_hands(list_cards, list_indices, nb_tests)
 
             print("Boucle terminée")
@@ -909,7 +946,7 @@ class ExtensiveAgent(Agent):
         """Act based on an observation."""
         # The agent only plays on its turn
         # MEMO: produce_current_state_observation(self, local_player_id = None, state = None)
-        
+        self.profile_time = {"unseen_cards": 0, "score_game": 0, "calculate_all_possible_cards_and_prob": 0, "enumerate_hands": 0, "do_all_actions": 0, "copy": 0, "produce_current_state_observation": 0, "calculate_all_possible_cards_and_prob HINTS ONLY": 0}
         if not(self.hands_initialized):
             self.saved_observation = observation
             self.hands_initialized = True
@@ -919,10 +956,13 @@ class ExtensiveAgent(Agent):
         b = self.prepare_global_game_state(observation)
         if b == -1:
             return  -1
-
+        ref_time = time.time()
         expected_value = self.calculate_expected_value( 0, self.global_game_state, self.local_id(0))
-        print(expected_value)
+        print("TOTAL TIME:", -ref_time+time.time())
+        print("PROFILING:", self.profile_time)
+        print("EXPECTED_VALUES:",expected_value)
         print("global legal moves:",observation["pyhanabi"].legal_moves())
+        
         return observation["legal_moves"][np.argmax(expected_value)]
 
 
