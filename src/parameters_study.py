@@ -34,7 +34,7 @@ for play_threshold in PLAYS:
     mean_rewards.append(mean_reward)
     median_rewards.append(median_reward)
 
-#TODO: plot 3D
+# Plot 3D data
 fig = plt.figure()
 
 X = np.array([[PLAYS[i] for j in range(len(DISCARDS))] for i in range(len(PLAYS))])

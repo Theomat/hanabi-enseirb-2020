@@ -73,6 +73,10 @@ class PartialBelief:
             offset %= self.players
 
     def update_with_action(self, action: Dict):
+        """
+        Update this belief with the specified action.
+        It is assumed the action originates from the player 'perspective_of'.
+        """
         if action["action_type"] == "PLAY" or action["action_type"] == "DISCARD":
             offset = action["card_index"]
             self.possible_ranks[offset:self.hand_size - 1, :] = self.possible_ranks[offset + 1:, :]
@@ -81,6 +85,11 @@ class PartialBelief:
             self.possible_colors[self.hand_size - 1, :] = 1
 
     def update_with_hint(self, action: Dict, hand: List[Dict]):
+        """
+        Update this belief with the specified hint.
+        It is assumed the action target the player 'perspective_of'.
+        """
+        # Basically we update what's possible for ranks and colors for each card
         if action["action_type"] == "REVEAL_COLOR":
             color = action["color"]
             cindex = _COLOR_TO_INDEX[color]
@@ -100,6 +109,7 @@ class PartialBelief:
                     self.possible_ranks[offset, rank] = 0
 
     def _update_hints(self, observation: Dict):
+        # The information here is only used when computing probabality only on ranks or only on colors
         knowledge = observation["card_knowledge"]
 
         self.virtual_colors = np.zeros(5)
@@ -163,6 +173,7 @@ class PartialBelief:
         assert len(np.where(self.deck < 0)[0]) == 0, "[Counting error] a card was removed one time too many !"
 
     def _filtered_deck(self, offset: int) -> np.ndarray:
+        """"Computes a deck of possibles card for the card in hand at offset."""
         cards = self.deck.copy()
         for c in range(5):
             cards[c, :] *= self.possible_colors[offset, c]
@@ -171,6 +182,7 @@ class PartialBelief:
         return cards
 
     def _total_cards(self, offset: int, color=False, rank=False) -> int:
+        """"Computes the number of possibles card for the card in hand at offset."""
         cards = self.deck.copy()
 
         for c in range(5):
@@ -181,9 +193,7 @@ class PartialBelief:
 
         cards = np.sum(cards)
         if rank:
-            print("bef:", cards)
             cards -= np.sum(self.virtual_ranks * self.possible_ranks[offset])
-            print("aft:", cards)
         if color:
             cards -= np.sum(self.virtual_colors * self.possible_colors[offset])
         return cards
@@ -204,22 +214,16 @@ class PartialBelief:
 
     def _prob_card(self, rank: int, color: int, offset: int) -> float:
         total_cards = self._total_cards(offset, color=False, rank=False)
-        # print("Total cards=", total_cards)
         if total_cards == 0:
             return 0
         total_in_deck = self.deck[color, rank]
         return total_in_deck / total_cards
 
     def _prob_card_knowing_color(self, rank: int, color: int, offset: int) -> float:
-        # p1 = P(C=r & R=r)
-        # p2 = P(C=c)
         p1 = self._prob_card(rank, color, offset)
         return p1
 
     def _prob_card_knowing_rank(self, rank: int, color: int, offset: int) -> float:
-        # p1 = P(C=r & R=r)
-        # p1 does not take into account hints
-        # p2 = P(R=R)
         p1 = self._prob_card(rank, color, offset)
         return p1
 
@@ -265,6 +269,9 @@ class PartialBelief:
                 return 0
 
     def probability_playable(self, offset: int, fireworks: Dict) -> float:
+        """
+        Return the probability that a card is playable on top of the fireworks.
+        """
         probs = np.zeros(5)
         for color, n in fireworks.items():
             if n <= 4:
@@ -272,6 +279,9 @@ class PartialBelief:
         return np.sum(probs)
 
     def probability_useless(self, offset: int, fireworks: Dict) -> float:
+        """
+        Return the probability that a card is a card that has already been played in the fireworks.
+        """
         p = 0
         for color, n in fireworks.items():
             if n == 5:
@@ -281,6 +291,10 @@ class PartialBelief:
         return p
 
     def most_informative_hint(self, actual_hand: List[Dict]) -> Tuple[Dict, float]:
+        """
+        Return the best hint possible and the number of bits of information that hints give to the other player.
+        """
+        # List possible hints
         ranks = []
         colors = []
         for card in actual_hand:
@@ -293,38 +307,35 @@ class PartialBelief:
         best_info = -1
         best_rank = None
         best_color = None
+        # Compute hint score for ranks
         for rank in ranks:
             info = 0
             for offset, card in enumerate(actual_hand):
                 r, c = card["rank"], card["color"]
                 if r == rank:
                     p = self.probability(offset, r, c)
-                    # print(f"P(rank={r}, color={c}, offset={offset})={p:.4f} possible ranks:", self.possible_ranks[offset], "possible colors:", self.possible_colors[offset])
                     assert p > 0
                     info += -np.log(p)
                 else:
                     p = self._prob_rank(rank, offset)
                     assert p < 1
                     info += -np.log(1 - p)
-            # print("Info of rank:", rank, f"info={info:.3f}")
             if info > best_info:
                 best_info = info
                 best_rank = rank
-
+        # Compute hint score for colors
         for color in colors:
             info = 0
             for offset, card in enumerate(actual_hand):
                 r, c = card["rank"], card["color"]
                 if c == color:
                     p = self.probability(offset, r, c)
-                    # print(f"P(rank={r}, color={c}, offset={offset})={p:.4f} possible ranks:", self.possible_ranks[offset], "possible colors:", self.possible_colors[offset])
                     assert p > 0
                     info += -np.log(p)
                 else:
                     p = self._prob_color(_COLOR_TO_INDEX[color], offset)
                     assert p < 1
                     info += -np.log(1 - p)
-            # print("Info of color:", color, f"info={info:.3f}")
             if info > best_info:
                 best_info = info
                 best_rank = None

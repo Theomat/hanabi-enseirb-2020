@@ -6,6 +6,9 @@ import numpy as np
 
 
 class GameRunner():
+    """
+    Run games passing the right events for the agent to update its partial belief.
+    """
 
     def __init__(self, agents, episodes: int, config: Dict = None):
         self.agents = agents
@@ -37,9 +40,11 @@ class GameRunner():
                 observations, reward, done, unused_info = environment.step(current_player_action)
                 if current_player_action is not None:
                     hand = None
+                    # If an action is a reveal we need to pass the target hand
                     if current_player_action["action_type"].startswith("REVEAL"):
                         observed_hands = observations['player_observations'][player_id]["observed_hands"]
                         hand = observed_hands[current_player_action["target_offset"]]
+                    # Pass action to agents
                     for agent_id, agent in enumerate(agents):
                         agent.on_action(player_id, current_player_action, hand)
 

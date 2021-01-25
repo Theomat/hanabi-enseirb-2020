@@ -11,7 +11,8 @@ class GreedyAgent(Agent):
     def __init__(self, config, *args, **kwargs):
         """Initialize the agent."""
         self.reset(config)
-
+        self.play_threshold = .9
+        self.discard_thresholds = [.4 + .5 * i / self.max_information_tokens for i in range(self.max_information_tokens + 1)]
 
     def act(self, observation):
         """Act based on an observation."""
@@ -32,6 +33,7 @@ class GreedyAgent(Agent):
         if observation["information_tokens"] < self.max_information_tokens:
             best_discard = None
             best_prob = -1
+            # We need to remember the best discard choice in case we are forced to discard
             discard_threshold = self.discard_thresholds[observation['information_tokens']]
             for card_index, hint in enumerate(observation['card_knowledge'][0]):
                 p = self.player_beliefs[0].probability_useless(card_index, fireworks)
@@ -76,5 +78,3 @@ class GreedyAgent(Agent):
         self.max_information_tokens = config.get('information_tokens', 8)
         self.player_beliefs = [PartialBelief(config.get('players', 2), player, 0)
                                for player in range(config.get('players', 2))]
-        self.play_threshold = .9
-        self.discard_thresholds = [.4 + .5 * i / self.max_information_tokens for i in range(self.max_information_tokens + 1)]
