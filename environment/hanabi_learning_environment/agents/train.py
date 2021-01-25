@@ -2,8 +2,11 @@ import numpy as np
 from hanabi_learning_environment import pyhanabi
 from hanabi_learning_environment import rl_env
 from hanabi_learning_environment.agents.dqn_agent import DQNAgent
+from hanabi_learning_environment.agents.simple_agent import SimpleAgent
 
 from tqdm import trange
+
+import json
 
 import torch
 import torch.nn.functional as F
@@ -140,12 +143,15 @@ def run_training(
 ):  # !! config, game_parameters necessary ?
     """Play a game, selecting random actions."""
     agent1 = DQNAgent(config, encoded_observation_size=STATE_SIZE)
-    agent2 = DQNAgent(config, encoded_observation_size=STATE_SIZE)
+    agent2 = SimpleAgent(config)
 
     agents = [agent1, agent2]
+    trainable_agents = [agent1]
     env = rl_env.make()
 
     total_rewards = 0
+
+    last_episodes = []
 
     for i_episode in trange(num_episodes):
 
@@ -161,56 +167,74 @@ def run_training(
 
         agent_buffer = [torch.zeros(STATE_SIZE) for agent in agents]
 
+        episode_info = []
+
         for i in count():
             agent = agents[i % 2]
             observation = observation_all["player_observations"][i % 2]
+            cpy = dict(observation)
+            del cpy["pyhanabi"]
+            del cpy["vectorized"]
+            episode_info.append(cpy)
 
-            # Select and perform an action
-            buffer = agent_buffer[i % 2]
-            copy = buffer.clone()
-            buffer[OBSERVATION_SIZE:] = copy[:STATE_SIZE - OBSERVATION_SIZE]
-            buffer[:OBSERVATION_SIZE] = torch.from_numpy(np.asarray(observation["vectorized"]))
+            # Choose action
+            if agent in trainable_agents:
+                # Select and perform an action
+                buffer = agent_buffer[i % 2]
+                copy = buffer.clone()
+                buffer[OBSERVATION_SIZE:] = copy[:STATE_SIZE - OBSERVATION_SIZE].clone()
+                buffer[:OBSERVATION_SIZE] = torch.from_numpy(np.asarray(observation["vectorized"]))
 
-            action, action_number = agent.select_action(observation, buffer)
+                action, action_number = agent.select_action(observation, buffer)
 
+                if is_hint(action_number, agent.action_space):
+                    episode_hints[i % 2] += 1
+            else:
+                action = agent.act(observation)
+
+                if action["action_type"].startswith("REVEAL"):
+                    episode_hints[i % 2] += 1
+
+            episode_info.append(action)
             new_obs_all, reward, done, _ = env.step(action)
             new_obs = new_obs_all["player_observations"][i % 2]
 
-            reward = torch.FloatTensor([reward], device=device)
-            is_important = backprop_reward_if_card_is_played(episode_memory, action, reward, agent.action_space, len(agents), observation_all["player_observations"][(i + 1) % 2])
+            # Store transition
+            if agent in trainable_agents:
+                reward = torch.FloatTensor([reward], device=device)
+                is_important = backprop_reward_if_card_is_played(episode_memory, action, reward, agent.action_space, len(agents), observation_all["player_observations"][(i + 1) % 2])
 
-            # Prepare next buffer
-            next_buffer = buffer.clone()
-            next_buffer[OBSERVATION_SIZE:] = buffer[:STATE_SIZE - OBSERVATION_SIZE]
-            next_buffer[:OBSERVATION_SIZE] = torch.from_numpy(np.asarray(new_obs["vectorized"]))
+                # Prepare next buffer
+                next_buffer = buffer.clone()
+                next_buffer[OBSERVATION_SIZE:] = buffer[:STATE_SIZE - OBSERVATION_SIZE].clone()
+                next_buffer[:OBSERVATION_SIZE] = torch.from_numpy(np.asarray(new_obs["vectorized"]))
 
-            if is_hint(action_number, agent.action_space):
-                episode_hints[i % 2] += 1
-
-            # Store the transition in memory
-            if done:
-                episode_memory.append([
-                    buffer.clone(),
-                    torch.LongTensor([action_number]),
-                    None,
-                    reward,
-                    is_important])
-                total_rewards += reward.item()
-                break
-            else:
-                episode_memory.append([
-                    buffer.clone(),
-                    torch.LongTensor([action_number]),
-                    next_buffer,
-                    reward,
-                    is_important])
+                # Store the transition in memory
+                if done:
+                    episode_memory.append([
+                        buffer.clone(),
+                        torch.LongTensor([action_number]),
+                        None,
+                        reward,
+                        is_important])
+                    total_rewards += reward.item()
+                    break
+                else:
+                    episode_memory.append([
+                        buffer.clone(),
+                        torch.LongTensor([action_number]),
+                        next_buffer,
+                        reward,
+                        is_important])
 
             # Move to the next state
             observation_all = new_obs_all
-
+        # Remember last episodes
+        last_episodes.append(episode_info)
+        last_episodes = last_episodes[-5:]
         # Add episode memory to all agents
         for memory in episode_memory:
-            for agent in agents:
+            for agent in trainable_agents:
                 agent.memory.push(memory)
 
         # Add metric
@@ -222,7 +246,8 @@ def run_training(
         writer.add_scalar("episode score", state.score(), i_episode)
         writer.add_scalar("firework score", score_game(new_obs["fireworks"]), i_episode)
 
-        for agent in agents:
+        # Optimize trainable agents
+        for agent in trainable_agents:
             # Perform one step of the optimization (on the target network)
             agent.policy_net.train()
             optimize_model(agent, i_episode)
@@ -233,7 +258,7 @@ def run_training(
                 agent.target_net.load_state_dict(agent.policy_net.state_dict())
 
     print("Complete, saving...")
-    for i, agent in enumerate(agents):
+    for i, agent in enumerate(trainable_agents):
         torch.save(agent.policy_net.state_dict(), f"policy_net_{i}.pt")
     print("")
     print("Game done. Terminal state:")
@@ -241,6 +266,11 @@ def run_training(
     print(state)
     print("")
     print("score: {}".format(state.score()))
+
+    # Dump last episodes
+    for i, game in enumerate(last_episodes):
+        with open(f"./last_episode_{5-i}.json", "w") as f:
+            json.dump(game, f)
 
 
 if __name__ == "__main__":
@@ -251,5 +281,5 @@ if __name__ == "__main__":
     run_training(
         {"players": flags["players"], "colors": 5, "ranks": 5, "hand_size": 5},
         {"players": 2, "random_start_player": True},
-        num_episodes=5000,
+        num_episodes=10000,
     )
